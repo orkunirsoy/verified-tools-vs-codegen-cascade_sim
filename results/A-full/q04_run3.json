@@ -1,0 +1,330 @@
+{
+  "condition": "A-full",
+  "question_id": "q04",
+  "run_index": 3,
+  "model": "gpt-4o-mini",
+  "temperature": 1.0,
+  "case": "case118",
+  "question_text": "LOAD. A bus's LOAD is its betweenness centrality: the number of shortest paths\nbetween all pairs of buses that pass through that bus, counted raw (unnormalized).\nThe \"busiest\" bus is the one with the highest load under this definition.\nLOAD here does NOT mean electrical power demand in MW. Ignore any MW demand\nvalues attached to the grid data.\n\nOVERLOAD CASCADE. Use the Motter-Lai cascading failure model, defined as follows:\n  1. Each bus has a LOAD equal to its betweenness centrality (unnormalized, i.e.\n     raw shortest-path counts) computed on the INITIAL intact network.\n  2. Each bus has a fixed CAPACITY = (1 + alpha) * its INITIAL load, where\n     alpha = 0.2. Capacity is computed once from the intact network and NEVER\n     changes during the cascade.\n  3. Apply the trigger described in the question.\n  4. Recompute every surviving bus's load (betweenness) on the CURRENT surviving\n     network. Any bus whose current load is strictly greater than its capacity\n     is overloaded. Remove all such buses simultaneously. One ROUND is one\n     execution of this step.\n  5. Repeat step 4 until a round produces no new failures.\nWhen the cascade finishes, a bus has FAILED if it is not part of the largest\nconnected component. That covers buses that overloaded and buses that were cut off\nfrom the main network without ever overloading: either way they are out of service.\nThe trigger itself has failed too.\nReport any fraction as a fraction of the number of buses in the largest connected\ncomponent BEFORE the cascade. This grid starts fully connected, so that is all\n118 buses. (This is G = N'/N in Motter-Lai 2002.)\n\nQUESTION: If the single busiest bus fails and triggers an overload cascade, how many additional buses fail as a result, not counting the one that started it?",
+  "context_blocks": [
+    "load",
+    "overload"
+  ],
+  "llm_calls": [
+    {
+      "step": "plan",
+      "attempt": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a planning component in a power-grid analysis system.\n\nYou do NOT perform any analysis yourself. You choose which verified analysis functions to call, in what order, and with what arguments. Another component executes them.\n\nAvailable functions:\n- grid_info: Size and shape of the grid: number of buses, number of lines, mean degree, whether it is connected.\n    arguments: none\n    returns:\n      n_buses: int\n      n_lines: int\n      mean_degree: float\n      is_connected: bool\n- degree_ranking: Rank buses by DEGREE, the number of lines directly attached to a bus. Degree is not the same quantity as load.\n    arguments:\n      k: int, how many to return (default 5)\n    returns:\n      top_bus: int, the single highest-degree bus\n      top_buses: list[int], the k highest-degree bus ids, highest first\n      ranking: list of {bus, degree}\n      n_tied_at_top: int, how many buses share the top degree\n- load_ranking: Rank buses by LOAD (betweenness centrality), highest first. Returns the single top-ranked bus and the top k of them.\n    arguments:\n      k: int, how many to return (default 5)\n    returns:\n      busiest_bus: int, the single highest-load bus\n      top_buses: list[int], the k highest-load bus ids, highest first\n      ranking: list of {bus, load}\n      next_load_outside_top_k: float\n- simulate_cascade: Run ONE Motter-Lai overload cascade and report the outcome: surviving fraction, buses failed, buses overloaded, rounds. The trigger is either a list of buses that fail or a single line that trips. An optional new line may be added before the run, in which case the modified network is the initial one.\n    arguments:\n      trigger_buses: list[int], buses that fail (give this OR trigger_line)\n      trigger_line: [int, int], a line that trips (give this OR trigger_buses)\n      alpha: float, tolerance parameter (default 0.2)\n      added_line: [int, int], a new line built before the cascade (optional)\n    returns:\n      lcc_fraction: float, surviving fraction of the grid\n      lcc_size: int, buses left in the largest component\n      n_failed_total: int, buses NOT in the largest component (includes the trigger buses)\n      n_failed_excluding_trigger: int, same but minus the trigger buses\n      n_overloaded: int, buses that exceeded capacity\n      rounds: int, cascade rounds until it stopped\n      n_islands: int, connected components at the end\n- list_buses: Every bus id in the grid, as a list.\n    arguments: none\n    returns:\n      buses: list[int], every bus id\n      n_buses: int\n- list_lines: Every line in the grid, as a list of [busA, busB] pairs.\n    arguments: none\n    returns:\n      lines: list of [busA, busB]\n      n_lines: int\n- column: Pull one field out of a LIST of records, in order, like selecting a column from a table. Only for the `results` of a repeated step. A single analysis result is not a list and does not need this.\n    arguments:\n      records: a list of records, e.g. the `results` of a repeated step (required)\n      field: which field to extract (required)\n    returns:\n      values: list of that field's values, in record order\n      n: int\n      field: str\n- argmin: Position of the smallest value in a list of numbers.\n    arguments:\n      values: list of numbers (required)\n    returns:\n      index: int, position of the smallest value\n      value: the smallest value\n      n_tied: int, how many positions share it; >1 means no unique answer\n      tied_indices: the tied positions when there is no unique winner\n- argmax: Position of the largest value in a list of numbers.\n    arguments:\n      values: list of numbers (required)\n    returns:\n      index: int, position of the largest value\n      value: the largest value\n      n_tied: int, how many positions share it; >1 means no unique answer\n      tied_indices: the tied positions when there is no unique winner\n- at: The record at a given position in a list. Use it to look up which candidate an argmin or argmax position refers to.\n    arguments:\n      records: a list of records (required)\n      index: int, the position (required)\n    returns:\n      record: the record at that position\n      index: int\n\nProduce a plan as a single JSON object and nothing else:\n\n{\"steps\": [{\"id\": \"s1\", \"tool\": \"<name>\", \"args\": {...}}, ...]}\n\nREFERENCES. A later step may use an earlier step's output by passing the string \"$<step_id>.<field>\" as an argument value. \"$s1.busiest_bus\" is the busiest_bus field returned by step s1. Dotted paths reach nested fields. If a reference already points at a list, pass it on its own -- do NOT wrap it in another list. Wrap only a single value that is going into an argument expecting a list.\n\nREPEATING A STEP. Add \"foreach\" to a step to run it once per element of a list. The list is either a reference to an earlier step's output (\"$s1.buses\") or, when the question names the candidates itself, a literal list written straight into the plan (for example [[31, 81], [48, 67]]). Inside that step's args, \"$item\" is the current element. The step's result is {\"results\": [...]}, one record per element, and each record also carries the element under the key \"item\". For example, to run an analysis over every bus:\n\n  {\"id\": \"s1\", \"tool\": \"list_buses\", \"args\": {}},\n  {\"id\": \"s2\", \"tool\": \"simulate_cascade\", \"foreach\": \"$s1.buses\",\n    \"args\": {\"trigger_buses\": [\"$item\"], \"alpha\": 0.2}}\n\nThere is no function that sweeps or ranks for you. To find a best or worst case you must do four things: repeat the analysis over the candidates, pull out the column you care about, take its argmin or argmax, and then look up WHICH candidate that position refers to. argmin and argmax return a position, not a candidate, so without that last lookup you only know how good the winner was, not which one it is. Choosing which column and which direction is your decision.\n\nWHERE THE ANSWER COMES FROM. Every step's full output is handed to the reporter, so you never need a step just to read a value out of a result. If the analysis step already produces the number asked for, the plan ENDS there. column/argmin/argmax/at exist only for picking a winner out of a repeated step's `results` list, never for reading a field off a single result.\n\nKeep the plan minimal. Do not add steps whose results you would not use."
+        },
+        {
+          "role": "user",
+          "content": "Example 1.\nQUESTION: Take bus 12 as the one that fails, with the tolerance parameter set to 0.5 rather than 0.2. How big is the component left standing, relative to the whole?\nPLAN: {\"steps\": [\n  {\"id\": \"s1\", \"tool\": \"simulate_cascade\", \"args\": {\"trigger_buses\": [12], \"alpha\": 0.5}}\n]}\n\nThe plan ENDS at s1. lcc_fraction is already part of s1's result, and the reporter is given every step's full output, so no further step is needed to read it out.\n\nExample 2.\nQUESTION: Taking the buses one by one as the thing that breaks, find the one whose failure pushes the fewest others past capacity.\nPLAN: {\"steps\": [\n  {\"id\": \"s1\", \"tool\": \"list_buses\", \"args\": {}},\n  {\"id\": \"s2\", \"tool\": \"simulate_cascade\", \"foreach\": \"$s1.buses\", \"args\": {\"trigger_buses\": [\"$item\"], \"alpha\": 0.2}},\n  {\"id\": \"s3\", \"tool\": \"column\", \"args\": {\"records\": \"$s2.results\", \"field\": \"n_overloaded\"}},\n  {\"id\": \"s4\", \"tool\": \"argmin\", \"args\": {\"values\": \"$s3.values\"}},\n  {\"id\": \"s5\", \"tool\": \"at\", \"args\": {\"records\": \"$s2.results\", \"index\": \"$s4.index\"}}\n]}\n\nNote in Example 2 that finding a best or worst case takes several steps: build the candidate list, repeat the analysis over it, pull out the column that matters, take its argmin or argmax, then look up which candidate that was. No single function does this for you. Which column and which direction depend on the question and are your decision.\n\nNow the real question.\n\nThe grid is an undirected graph with 118 buses (nodes) and 179 power lines (edges). Bus ids are integers. Parallel branches between the same pair of buses are collapsed into a single edge.\n\nLOAD. A bus's LOAD is its betweenness centrality: the number of shortest paths\nbetween all pairs of buses that pass through that bus, counted raw (unnormalized).\nThe \"busiest\" bus is the one with the highest load under this definition.\nLOAD here does NOT mean electrical power demand in MW. Ignore any MW demand\nvalues attached to the grid data.\n\nOVERLOAD CASCADE. Use the Motter-Lai cascading failure model, defined as follows:\n  1. Each bus has a LOAD equal to its betweenness centrality (unnormalized, i.e.\n     raw shortest-path counts) computed on the INITIAL intact network.\n  2. Each bus has a fixed CAPACITY = (1 + alpha) * its INITIAL load, where\n     alpha = 0.2. Capacity is computed once from the intact network and NEVER\n     changes during the cascade.\n  3. Apply the trigger described in the question.\n  4. Recompute every surviving bus's load (betweenness) on the CURRENT surviving\n     network. Any bus whose current load is strictly greater than its capacity\n     is overloaded. Remove all such buses simultaneously. One ROUND is one\n     execution of this step.\n  5. Repeat step 4 until a round produces no new failures.\nWhen the cascade finishes, a bus has FAILED if it is not part of the largest\nconnected component. That covers buses that overloaded and buses that were cut off\nfrom the main network without ever overloading: either way they are out of service.\nThe trigger itself has failed too.\nReport any fraction as a fraction of the number of buses in the largest connected\ncomponent BEFORE the cascade. This grid starts fully connected, so that is all\n118 buses. (This is G = N'/N in Motter-Lai 2002.)\n\nQUESTION: If the single busiest bus fails and triggers an overload cascade, how many additional buses fail as a result, not counting the one that started it?"
+        }
+      ],
+      "response_text": "{\"steps\": [\n  {\"id\": \"s1\", \"tool\": \"load_ranking\", \"args\": {\"k\": 1}},\n  {\"id\": \"s2\", \"tool\": \"simulate_cascade\", \"args\": {\"trigger_buses\": [\"$s1.busiest_bus\"], \"alpha\": 0.2}},\n  {\"id\": \"s3\", \"tool\": \"column\", \"args\": {\"records\": \"$s2.results\", \"field\": \"n_failed_total\"}},\n  {\"id\": \"s4\", \"tool\": \"argmin\", \"args\": {\"values\": [1]}}  // Here we are just looking for the additional failures excluding the triggered bus\n]}",
+      "prompt_tokens": 2395,
+      "completion_tokens": 145,
+      "latency_s": 4.594083070755005,
+      "error": null
+    },
+    {
+      "step": "plan",
+      "attempt": 2,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a planning component in a power-grid analysis system.\n\nYou do NOT perform any analysis yourself. You choose which verified analysis functions to call, in what order, and with what arguments. Another component executes them.\n\nAvailable functions:\n- grid_info: Size and shape of the grid: number of buses, number of lines, mean degree, whether it is connected.\n    arguments: none\n    returns:\n      n_buses: int\n      n_lines: int\n      mean_degree: float\n      is_connected: bool\n- degree_ranking: Rank buses by DEGREE, the number of lines directly attached to a bus. Degree is not the same quantity as load.\n    arguments:\n      k: int, how many to return (default 5)\n    returns:\n      top_bus: int, the single highest-degree bus\n      top_buses: list[int], the k highest-degree bus ids, highest first\n      ranking: list of {bus, degree}\n      n_tied_at_top: int, how many buses share the top degree\n- load_ranking: Rank buses by LOAD (betweenness centrality), highest first. Returns the single top-ranked bus and the top k of them.\n    arguments:\n      k: int, how many to return (default 5)\n    returns:\n      busiest_bus: int, the single highest-load bus\n      top_buses: list[int], the k highest-load bus ids, highest first\n      ranking: list of {bus, load}\n      next_load_outside_top_k: float\n- simulate_cascade: Run ONE Motter-Lai overload cascade and report the outcome: surviving fraction, buses failed, buses overloaded, rounds. The trigger is either a list of buses that fail or a single line that trips. An optional new line may be added before the run, in which case the modified network is the initial one.\n    arguments:\n      trigger_buses: list[int], buses that fail (give this OR trigger_line)\n      trigger_line: [int, int], a line that trips (give this OR trigger_buses)\n      alpha: float, tolerance parameter (default 0.2)\n      added_line: [int, int], a new line built before the cascade (optional)\n    returns:\n      lcc_fraction: float, surviving fraction of the grid\n      lcc_size: int, buses left in the largest component\n      n_failed_total: int, buses NOT in the largest component (includes the trigger buses)\n      n_failed_excluding_trigger: int, same but minus the trigger buses\n      n_overloaded: int, buses that exceeded capacity\n      rounds: int, cascade rounds until it stopped\n      n_islands: int, connected components at the end\n- list_buses: Every bus id in the grid, as a list.\n    arguments: none\n    returns:\n      buses: list[int], every bus id\n      n_buses: int\n- list_lines: Every line in the grid, as a list of [busA, busB] pairs.\n    arguments: none\n    returns:\n      lines: list of [busA, busB]\n      n_lines: int\n- column: Pull one field out of a LIST of records, in order, like selecting a column from a table. Only for the `results` of a repeated step. A single analysis result is not a list and does not need this.\n    arguments:\n      records: a list of records, e.g. the `results` of a repeated step (required)\n      field: which field to extract (required)\n    returns:\n      values: list of that field's values, in record order\n      n: int\n      field: str\n- argmin: Position of the smallest value in a list of numbers.\n    arguments:\n      values: list of numbers (required)\n    returns:\n      index: int, position of the smallest value\n      value: the smallest value\n      n_tied: int, how many positions share it; >1 means no unique answer\n      tied_indices: the tied positions when there is no unique winner\n- argmax: Position of the largest value in a list of numbers.\n    arguments:\n      values: list of numbers (required)\n    returns:\n      index: int, position of the largest value\n      value: the largest value\n      n_tied: int, how many positions share it; >1 means no unique answer\n      tied_indices: the tied positions when there is no unique winner\n- at: The record at a given position in a list. Use it to look up which candidate an argmin or argmax position refers to.\n    arguments:\n      records: a list of records (required)\n      index: int, the position (required)\n    returns:\n      record: the record at that position\n      index: int\n\nProduce a plan as a single JSON object and nothing else:\n\n{\"steps\": [{\"id\": \"s1\", \"tool\": \"<name>\", \"args\": {...}}, ...]}\n\nREFERENCES. A later step may use an earlier step's output by passing the string \"$<step_id>.<field>\" as an argument value. \"$s1.busiest_bus\" is the busiest_bus field returned by step s1. Dotted paths reach nested fields. If a reference already points at a list, pass it on its own -- do NOT wrap it in another list. Wrap only a single value that is going into an argument expecting a list.\n\nREPEATING A STEP. Add \"foreach\" to a step to run it once per element of a list. The list is either a reference to an earlier step's output (\"$s1.buses\") or, when the question names the candidates itself, a literal list written straight into the plan (for example [[31, 81], [48, 67]]). Inside that step's args, \"$item\" is the current element. The step's result is {\"results\": [...]}, one record per element, and each record also carries the element under the key \"item\". For example, to run an analysis over every bus:\n\n  {\"id\": \"s1\", \"tool\": \"list_buses\", \"args\": {}},\n  {\"id\": \"s2\", \"tool\": \"simulate_cascade\", \"foreach\": \"$s1.buses\",\n    \"args\": {\"trigger_buses\": [\"$item\"], \"alpha\": 0.2}}\n\nThere is no function that sweeps or ranks for you. To find a best or worst case you must do four things: repeat the analysis over the candidates, pull out the column you care about, take its argmin or argmax, and then look up WHICH candidate that position refers to. argmin and argmax return a position, not a candidate, so without that last lookup you only know how good the winner was, not which one it is. Choosing which column and which direction is your decision.\n\nWHERE THE ANSWER COMES FROM. Every step's full output is handed to the reporter, so you never need a step just to read a value out of a result. If the analysis step already produces the number asked for, the plan ENDS there. column/argmin/argmax/at exist only for picking a winner out of a repeated step's `results` list, never for reading a field off a single result.\n\nKeep the plan minimal. Do not add steps whose results you would not use."
+        },
+        {
+          "role": "user",
+          "content": "Example 1.\nQUESTION: Take bus 12 as the one that fails, with the tolerance parameter set to 0.5 rather than 0.2. How big is the component left standing, relative to the whole?\nPLAN: {\"steps\": [\n  {\"id\": \"s1\", \"tool\": \"simulate_cascade\", \"args\": {\"trigger_buses\": [12], \"alpha\": 0.5}}\n]}\n\nThe plan ENDS at s1. lcc_fraction is already part of s1's result, and the reporter is given every step's full output, so no further step is needed to read it out.\n\nExample 2.\nQUESTION: Taking the buses one by one as the thing that breaks, find the one whose failure pushes the fewest others past capacity.\nPLAN: {\"steps\": [\n  {\"id\": \"s1\", \"tool\": \"list_buses\", \"args\": {}},\n  {\"id\": \"s2\", \"tool\": \"simulate_cascade\", \"foreach\": \"$s1.buses\", \"args\": {\"trigger_buses\": [\"$item\"], \"alpha\": 0.2}},\n  {\"id\": \"s3\", \"tool\": \"column\", \"args\": {\"records\": \"$s2.results\", \"field\": \"n_overloaded\"}},\n  {\"id\": \"s4\", \"tool\": \"argmin\", \"args\": {\"values\": \"$s3.values\"}},\n  {\"id\": \"s5\", \"tool\": \"at\", \"args\": {\"records\": \"$s2.results\", \"index\": \"$s4.index\"}}\n]}\n\nNote in Example 2 that finding a best or worst case takes several steps: build the candidate list, repeat the analysis over it, pull out the column that matters, take its argmin or argmax, then look up which candidate that was. No single function does this for you. Which column and which direction depend on the question and are your decision.\n\nNow the real question.\n\nThe grid is an undirected graph with 118 buses (nodes) and 179 power lines (edges). Bus ids are integers. Parallel branches between the same pair of buses are collapsed into a single edge.\n\nLOAD. A bus's LOAD is its betweenness centrality: the number of shortest paths\nbetween all pairs of buses that pass through that bus, counted raw (unnormalized).\nThe \"busiest\" bus is the one with the highest load under this definition.\nLOAD here does NOT mean electrical power demand in MW. Ignore any MW demand\nvalues attached to the grid data.\n\nOVERLOAD CASCADE. Use the Motter-Lai cascading failure model, defined as follows:\n  1. Each bus has a LOAD equal to its betweenness centrality (unnormalized, i.e.\n     raw shortest-path counts) computed on the INITIAL intact network.\n  2. Each bus has a fixed CAPACITY = (1 + alpha) * its INITIAL load, where\n     alpha = 0.2. Capacity is computed once from the intact network and NEVER\n     changes during the cascade.\n  3. Apply the trigger described in the question.\n  4. Recompute every surviving bus's load (betweenness) on the CURRENT surviving\n     network. Any bus whose current load is strictly greater than its capacity\n     is overloaded. Remove all such buses simultaneously. One ROUND is one\n     execution of this step.\n  5. Repeat step 4 until a round produces no new failures.\nWhen the cascade finishes, a bus has FAILED if it is not part of the largest\nconnected component. That covers buses that overloaded and buses that were cut off\nfrom the main network without ever overloading: either way they are out of service.\nThe trigger itself has failed too.\nReport any fraction as a fraction of the number of buses in the largest connected\ncomponent BEFORE the cascade. This grid starts fully connected, so that is all\n118 buses. (This is G = N'/N in Motter-Lai 2002.)\n\nQUESTION: If the single busiest bus fails and triggers an overload cascade, how many additional buses fail as a result, not counting the one that started it?"
+        },
+        {
+          "role": "assistant",
+          "content": "{\"steps\": [\n  {\"id\": \"s1\", \"tool\": \"load_ranking\", \"args\": {\"k\": 1}},\n  {\"id\": \"s2\", \"tool\": \"simulate_cascade\", \"args\": {\"trigger_buses\": [\"$s1.busiest_bus\"], \"alpha\": 0.2}},\n  {\"id\": \"s3\", \"tool\": \"column\", \"args\": {\"records\": \"$s2.results\", \"field\": \"n_failed_total\"}},\n  {\"id\": \"s4\", \"tool\": \"argmin\", \"args\": {\"values\": [1]}}  // Here we are just looking for the additional failures excluding the triggered bus\n]}"
+        },
+        {
+          "role": "user",
+          "content": "That plan has problems:\n- no parseable JSON object in response\nReturn a corrected plan as JSON only."
+        }
+      ],
+      "response_text": "{\"steps\": [\n  {\"id\": \"s1\", \"tool\": \"load_ranking\", \"args\": {\"k\": 1}},\n  {\"id\": \"s2\", \"tool\": \"simulate_cascade\", \"args\": {\"trigger_buses\": [\"$s1.busiest_bus\"], \"alpha\": 0.2}},\n  {\"id\": \"s3\", \"tool\": \"column\", \"args\": {\"records\": \"$s2.results\", \"field\": \"n_failed_total\"}},\n  {\"id\": \"s4\", \"tool\": \"argmin\", \"args\": {\"values\": \"$s3.values\"}},\n  {\"id\": \"s5\", \"tool\": \"at\", \"args\": {\"records\": \"$s2.results\", \"index\": \"$s4.index\"}}\n]}",
+      "prompt_tokens": 2570,
+      "completion_tokens": 164,
+      "latency_s": 3.901129961013794,
+      "error": null
+    },
+    {
+      "step": "plan",
+      "attempt": 3,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a planning component in a power-grid analysis system.\n\nYou do NOT perform any analysis yourself. You choose which verified analysis functions to call, in what order, and with what arguments. Another component executes them.\n\nAvailable functions:\n- grid_info: Size and shape of the grid: number of buses, number of lines, mean degree, whether it is connected.\n    arguments: none\n    returns:\n      n_buses: int\n      n_lines: int\n      mean_degree: float\n      is_connected: bool\n- degree_ranking: Rank buses by DEGREE, the number of lines directly attached to a bus. Degree is not the same quantity as load.\n    arguments:\n      k: int, how many to return (default 5)\n    returns:\n      top_bus: int, the single highest-degree bus\n      top_buses: list[int], the k highest-degree bus ids, highest first\n      ranking: list of {bus, degree}\n      n_tied_at_top: int, how many buses share the top degree\n- load_ranking: Rank buses by LOAD (betweenness centrality), highest first. Returns the single top-ranked bus and the top k of them.\n    arguments:\n      k: int, how many to return (default 5)\n    returns:\n      busiest_bus: int, the single highest-load bus\n      top_buses: list[int], the k highest-load bus ids, highest first\n      ranking: list of {bus, load}\n      next_load_outside_top_k: float\n- simulate_cascade: Run ONE Motter-Lai overload cascade and report the outcome: surviving fraction, buses failed, buses overloaded, rounds. The trigger is either a list of buses that fail or a single line that trips. An optional new line may be added before the run, in which case the modified network is the initial one.\n    arguments:\n      trigger_buses: list[int], buses that fail (give this OR trigger_line)\n      trigger_line: [int, int], a line that trips (give this OR trigger_buses)\n      alpha: float, tolerance parameter (default 0.2)\n      added_line: [int, int], a new line built before the cascade (optional)\n    returns:\n      lcc_fraction: float, surviving fraction of the grid\n      lcc_size: int, buses left in the largest component\n      n_failed_total: int, buses NOT in the largest component (includes the trigger buses)\n      n_failed_excluding_trigger: int, same but minus the trigger buses\n      n_overloaded: int, buses that exceeded capacity\n      rounds: int, cascade rounds until it stopped\n      n_islands: int, connected components at the end\n- list_buses: Every bus id in the grid, as a list.\n    arguments: none\n    returns:\n      buses: list[int], every bus id\n      n_buses: int\n- list_lines: Every line in the grid, as a list of [busA, busB] pairs.\n    arguments: none\n    returns:\n      lines: list of [busA, busB]\n      n_lines: int\n- column: Pull one field out of a LIST of records, in order, like selecting a column from a table. Only for the `results` of a repeated step. A single analysis result is not a list and does not need this.\n    arguments:\n      records: a list of records, e.g. the `results` of a repeated step (required)\n      field: which field to extract (required)\n    returns:\n      values: list of that field's values, in record order\n      n: int\n      field: str\n- argmin: Position of the smallest value in a list of numbers.\n    arguments:\n      values: list of numbers (required)\n    returns:\n      index: int, position of the smallest value\n      value: the smallest value\n      n_tied: int, how many positions share it; >1 means no unique answer\n      tied_indices: the tied positions when there is no unique winner\n- argmax: Position of the largest value in a list of numbers.\n    arguments:\n      values: list of numbers (required)\n    returns:\n      index: int, position of the largest value\n      value: the largest value\n      n_tied: int, how many positions share it; >1 means no unique answer\n      tied_indices: the tied positions when there is no unique winner\n- at: The record at a given position in a list. Use it to look up which candidate an argmin or argmax position refers to.\n    arguments:\n      records: a list of records (required)\n      index: int, the position (required)\n    returns:\n      record: the record at that position\n      index: int\n\nProduce a plan as a single JSON object and nothing else:\n\n{\"steps\": [{\"id\": \"s1\", \"tool\": \"<name>\", \"args\": {...}}, ...]}\n\nREFERENCES. A later step may use an earlier step's output by passing the string \"$<step_id>.<field>\" as an argument value. \"$s1.busiest_bus\" is the busiest_bus field returned by step s1. Dotted paths reach nested fields. If a reference already points at a list, pass it on its own -- do NOT wrap it in another list. Wrap only a single value that is going into an argument expecting a list.\n\nREPEATING A STEP. Add \"foreach\" to a step to run it once per element of a list. The list is either a reference to an earlier step's output (\"$s1.buses\") or, when the question names the candidates itself, a literal list written straight into the plan (for example [[31, 81], [48, 67]]). Inside that step's args, \"$item\" is the current element. The step's result is {\"results\": [...]}, one record per element, and each record also carries the element under the key \"item\". For example, to run an analysis over every bus:\n\n  {\"id\": \"s1\", \"tool\": \"list_buses\", \"args\": {}},\n  {\"id\": \"s2\", \"tool\": \"simulate_cascade\", \"foreach\": \"$s1.buses\",\n    \"args\": {\"trigger_buses\": [\"$item\"], \"alpha\": 0.2}}\n\nThere is no function that sweeps or ranks for you. To find a best or worst case you must do four things: repeat the analysis over the candidates, pull out the column you care about, take its argmin or argmax, and then look up WHICH candidate that position refers to. argmin and argmax return a position, not a candidate, so without that last lookup you only know how good the winner was, not which one it is. Choosing which column and which direction is your decision.\n\nWHERE THE ANSWER COMES FROM. Every step's full output is handed to the reporter, so you never need a step just to read a value out of a result. If the analysis step already produces the number asked for, the plan ENDS there. column/argmin/argmax/at exist only for picking a winner out of a repeated step's `results` list, never for reading a field off a single result.\n\nKeep the plan minimal. Do not add steps whose results you would not use."
+        },
+        {
+          "role": "user",
+          "content": "Example 1.\nQUESTION: Take bus 12 as the one that fails, with the tolerance parameter set to 0.5 rather than 0.2. How big is the component left standing, relative to the whole?\nPLAN: {\"steps\": [\n  {\"id\": \"s1\", \"tool\": \"simulate_cascade\", \"args\": {\"trigger_buses\": [12], \"alpha\": 0.5}}\n]}\n\nThe plan ENDS at s1. lcc_fraction is already part of s1's result, and the reporter is given every step's full output, so no further step is needed to read it out.\n\nExample 2.\nQUESTION: Taking the buses one by one as the thing that breaks, find the one whose failure pushes the fewest others past capacity.\nPLAN: {\"steps\": [\n  {\"id\": \"s1\", \"tool\": \"list_buses\", \"args\": {}},\n  {\"id\": \"s2\", \"tool\": \"simulate_cascade\", \"foreach\": \"$s1.buses\", \"args\": {\"trigger_buses\": [\"$item\"], \"alpha\": 0.2}},\n  {\"id\": \"s3\", \"tool\": \"column\", \"args\": {\"records\": \"$s2.results\", \"field\": \"n_overloaded\"}},\n  {\"id\": \"s4\", \"tool\": \"argmin\", \"args\": {\"values\": \"$s3.values\"}},\n  {\"id\": \"s5\", \"tool\": \"at\", \"args\": {\"records\": \"$s2.results\", \"index\": \"$s4.index\"}}\n]}\n\nNote in Example 2 that finding a best or worst case takes several steps: build the candidate list, repeat the analysis over it, pull out the column that matters, take its argmin or argmax, then look up which candidate that was. No single function does this for you. Which column and which direction depend on the question and are your decision.\n\nNow the real question.\n\nThe grid is an undirected graph with 118 buses (nodes) and 179 power lines (edges). Bus ids are integers. Parallel branches between the same pair of buses are collapsed into a single edge.\n\nLOAD. A bus's LOAD is its betweenness centrality: the number of shortest paths\nbetween all pairs of buses that pass through that bus, counted raw (unnormalized).\nThe \"busiest\" bus is the one with the highest load under this definition.\nLOAD here does NOT mean electrical power demand in MW. Ignore any MW demand\nvalues attached to the grid data.\n\nOVERLOAD CASCADE. Use the Motter-Lai cascading failure model, defined as follows:\n  1. Each bus has a LOAD equal to its betweenness centrality (unnormalized, i.e.\n     raw shortest-path counts) computed on the INITIAL intact network.\n  2. Each bus has a fixed CAPACITY = (1 + alpha) * its INITIAL load, where\n     alpha = 0.2. Capacity is computed once from the intact network and NEVER\n     changes during the cascade.\n  3. Apply the trigger described in the question.\n  4. Recompute every surviving bus's load (betweenness) on the CURRENT surviving\n     network. Any bus whose current load is strictly greater than its capacity\n     is overloaded. Remove all such buses simultaneously. One ROUND is one\n     execution of this step.\n  5. Repeat step 4 until a round produces no new failures.\nWhen the cascade finishes, a bus has FAILED if it is not part of the largest\nconnected component. That covers buses that overloaded and buses that were cut off\nfrom the main network without ever overloading: either way they are out of service.\nThe trigger itself has failed too.\nReport any fraction as a fraction of the number of buses in the largest connected\ncomponent BEFORE the cascade. This grid starts fully connected, so that is all\n118 buses. (This is G = N'/N in Motter-Lai 2002.)\n\nQUESTION: If the single busiest bus fails and triggers an overload cascade, how many additional buses fail as a result, not counting the one that started it?"
+        },
+        {
+          "role": "assistant",
+          "content": "{\"steps\": [\n  {\"id\": \"s1\", \"tool\": \"load_ranking\", \"args\": {\"k\": 1}},\n  {\"id\": \"s2\", \"tool\": \"simulate_cascade\", \"args\": {\"trigger_buses\": [\"$s1.busiest_bus\"], \"alpha\": 0.2}},\n  {\"id\": \"s3\", \"tool\": \"column\", \"args\": {\"records\": \"$s2.results\", \"field\": \"n_failed_total\"}},\n  {\"id\": \"s4\", \"tool\": \"argmin\", \"args\": {\"values\": [1]}}  // Here we are just looking for the additional failures excluding the triggered bus\n]}"
+        },
+        {
+          "role": "user",
+          "content": "That plan has problems:\n- no parseable JSON object in response\nReturn a corrected plan as JSON only."
+        },
+        {
+          "role": "assistant",
+          "content": "{\"steps\": [\n  {\"id\": \"s1\", \"tool\": \"load_ranking\", \"args\": {\"k\": 1}},\n  {\"id\": \"s2\", \"tool\": \"simulate_cascade\", \"args\": {\"trigger_buses\": [\"$s1.busiest_bus\"], \"alpha\": 0.2}},\n  {\"id\": \"s3\", \"tool\": \"column\", \"args\": {\"records\": \"$s2.results\", \"field\": \"n_failed_total\"}},\n  {\"id\": \"s4\", \"tool\": \"argmin\", \"args\": {\"values\": \"$s3.values\"}},\n  {\"id\": \"s5\", \"tool\": \"at\", \"args\": {\"records\": \"$s2.results\", \"index\": \"$s4.index\"}}\n]}"
+        },
+        {
+          "role": "user",
+          "content": "That plan has problems:\n- step 3: '$s2.results' does not exist. Step s2 produces a single result, not a list. If you are only trying to report a value that step s2 already computed, DELETE this step: the reporter is given every step's full output.\n- step 5: '$s2.results' does not exist. Step s2 produces a single result, not a list. If you are only trying to report a value that step s2 already computed, DELETE this step: the reporter is given every step's full output.\nReturn a corrected plan as JSON only."
+        }
+      ],
+      "response_text": "{\"steps\": [\n  {\"id\": \"s1\", \"tool\": \"load_ranking\", \"args\": {\"k\": 1}},\n  {\"id\": \"s2\", \"tool\": \"simulate_cascade\", \"args\": {\"trigger_buses\": [\"$s1.busiest_bus\"], \"alpha\": 0.2}}\n]}",
+      "prompt_tokens": 2867,
+      "completion_tokens": 71,
+      "latency_s": 5.864014148712158,
+      "error": null
+    },
+    {
+      "step": "report",
+      "attempt": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the reporting component of a power-grid analysis system.\n\nThe analysis has already been performed by verified functions. Their results are given to you below. Your job is to read the answer off those results and report it.\n\nDo NOT recompute anything. Do NOT second-guess the numbers. If the results contain the answer, report exactly that value.\n\nRespond with a single JSON object and nothing else:\n\n{\n  \"answer\": <the answer, as a bare number, a bus id, a list of bus ids, or a\n             two-element list [busA, busB] for a power line>,\n  \"units\": \"<fraction | count | bus | bus_list | line>\",\n  \"reasoning\": \"<two or three sentences on how you got it>\"\n}\n\nRules for `answer`:\n  * A fraction is a decimal between 0 and 1, not a percentage.\n  * A bus is a bare integer, e.g. 68 (not \"bus 68\").\n  * An ordered list of buses is a JSON list, most important first.\n  * A power line is a two-element list of bus ids, e.g. [79, 80].\nDo not wrap the JSON in markdown fences. Do not add commentary outside the JSON."
+        },
+        {
+          "role": "user",
+          "content": "LOAD. A bus's LOAD is its betweenness centrality: the number of shortest paths\nbetween all pairs of buses that pass through that bus, counted raw (unnormalized).\nThe \"busiest\" bus is the one with the highest load under this definition.\nLOAD here does NOT mean electrical power demand in MW. Ignore any MW demand\nvalues attached to the grid data.\n\nOVERLOAD CASCADE. Use the Motter-Lai cascading failure model, defined as follows:\n  1. Each bus has a LOAD equal to its betweenness centrality (unnormalized, i.e.\n     raw shortest-path counts) computed on the INITIAL intact network.\n  2. Each bus has a fixed CAPACITY = (1 + alpha) * its INITIAL load, where\n     alpha = 0.2. Capacity is computed once from the intact network and NEVER\n     changes during the cascade.\n  3. Apply the trigger described in the question.\n  4. Recompute every surviving bus's load (betweenness) on the CURRENT surviving\n     network. Any bus whose current load is strictly greater than its capacity\n     is overloaded. Remove all such buses simultaneously. One ROUND is one\n     execution of this step.\n  5. Repeat step 4 until a round produces no new failures.\nWhen the cascade finishes, a bus has FAILED if it is not part of the largest\nconnected component. That covers buses that overloaded and buses that were cut off\nfrom the main network without ever overloading: either way they are out of service.\nThe trigger itself has failed too.\nReport any fraction as a fraction of the number of buses in the largest connected\ncomponent BEFORE the cascade. This grid starts fully connected, so that is all\n118 buses. (This is G = N'/N in Motter-Lai 2002.)\n\nQUESTION: If the single busiest bus fails and triggers an overload cascade, how many additional buses fail as a result, not counting the one that started it?\n\nVerified analysis results:\n[\n  {\n    \"step\": \"s1\",\n    \"tool\": \"load_ranking\",\n    \"args\": {\n      \"k\": 1\n    },\n    \"result\": {\n      \"ranking\": [\n        {\n          \"bus\": 68,\n          \"load\": 2116.97\n        }\n      ],\n      \"top_buses\": [\n        68\n      ],\n      \"busiest_bus\": 68,\n      \"next_load_outside_top_k\": 1947.85\n    }\n  },\n  {\n    \"step\": \"s2\",\n    \"tool\": \"simulate_cascade\",\n    \"args\": {\n      \"trigger_buses\": [\n        68\n      ],\n      \"alpha\": 0.2\n    },\n    \"result\": {\n      \"trigger\": {\n        \"buses_omitted\": \"1 entries omitted for brevity\"\n      },\n      \"alpha\": 0.2,\n      \"added_line\": null,\n      \"rounds\": 2,\n      \"lcc_size\": 22,\n      \"lcc_fraction\": 0.1864406779661017,\n      \"n_islands\": 9,\n      \"n_failed_total\": 96,\n      \"n_failed_excluding_trigger\": 95,\n      \"n_overloaded\": 29,\n      \"overloaded_buses_omitted\": \"29 entries omitted for brevity\"\n    }\n  }\n]"
+        }
+      ],
+      "response_text": "{\n  \"answer\": 95,\n  \"units\": \"count\",\n  \"reasoning\": \"The analysis reports that 96 buses failed in total due to the overload cascade triggered by the busiest bus, bus 68. Excluding the triggering bus itself, 95 additional buses failed as a result.\"\n}",
+      "prompt_tokens": 977,
+      "completion_tokens": 63,
+      "latency_s": 1.412646770477295,
+      "error": null
+    }
+  ],
+  "tool_calls": [
+    {
+      "name": "load_ranking",
+      "args": {
+        "k": 1
+      },
+      "result": {
+        "ranking": [
+          {
+            "bus": 68,
+            "load": 2116.97
+          }
+        ],
+        "top_buses": [
+          68
+        ],
+        "busiest_bus": 68,
+        "next_load_outside_top_k": 1947.85
+      },
+      "error": null,
+      "duration_s": 0.030577898025512695
+    },
+    {
+      "name": "simulate_cascade",
+      "args": {
+        "trigger_buses": [
+          68
+        ],
+        "alpha": 0.2
+      },
+      "result": {
+        "trigger": {
+          "buses": [
+            68
+          ]
+        },
+        "alpha": 0.2,
+        "added_line": null,
+        "rounds": 2,
+        "lcc_size": 22,
+        "lcc_fraction": 0.1864406779661017,
+        "n_islands": 9,
+        "n_failed_total": 96,
+        "n_failed_excluding_trigger": 95,
+        "n_overloaded": 29,
+        "overloaded_buses": [
+          18,
+          19,
+          20,
+          24,
+          25,
+          28,
+          30,
+          33,
+          36,
+          45,
+          47,
+          58,
+          60,
+          62,
+          63,
+          64,
+          65,
+          67,
+          71,
+          74,
+          75,
+          78,
+          79,
+          80,
+          90,
+          91,
+          95,
+          112,
+          117
+        ]
+      },
+      "error": null,
+      "duration_s": 0.06607389450073242
+    }
+  ],
+  "code_attempts": [],
+  "plan": {
+    "steps": [
+      {
+        "id": "s1",
+        "tool": "load_ranking",
+        "args": {
+          "k": 1
+        }
+      },
+      {
+        "id": "s2",
+        "tool": "simulate_cascade",
+        "args": {
+          "trigger_buses": [
+            "$s1.busiest_bus"
+          ],
+          "alpha": 0.2
+        }
+      }
+    ]
+  },
+  "validation": [
+    {
+      "attempt": 1,
+      "problems": [
+        "no parseable JSON object in response"
+      ],
+      "enabled": true,
+      "plan": null
+    },
+    {
+      "attempt": 2,
+      "problems": [
+        "step 3: '$s2.results' does not exist. Step s2 produces a single result, not a list. If you are only trying to report a value that step s2 already computed, DELETE this step: the reporter is given every step's full output.",
+        "step 5: '$s2.results' does not exist. Step s2 produces a single result, not a list. If you are only trying to report a value that step s2 already computed, DELETE this step: the reporter is given every step's full output."
+      ],
+      "enabled": true,
+      "plan": {
+        "steps": [
+          {
+            "id": "s1",
+            "tool": "load_ranking",
+            "args": {
+              "k": 1
+            }
+          },
+          {
+            "id": "s2",
+            "tool": "simulate_cascade",
+            "args": {
+              "trigger_buses": [
+                "$s1.busiest_bus"
+              ],
+              "alpha": 0.2
+            }
+          },
+          {
+            "id": "s3",
+            "tool": "column",
+            "args": {
+              "records": "$s2.results",
+              "field": "n_failed_total"
+            }
+          },
+          {
+            "id": "s4",
+            "tool": "argmin",
+            "args": {
+              "values": "$s3.values"
+            }
+          },
+          {
+            "id": "s5",
+            "tool": "at",
+            "args": {
+              "records": "$s2.results",
+              "index": "$s4.index"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "attempt": 3,
+      "problems": [],
+      "enabled": true,
+      "plan": {
+        "steps": [
+          {
+            "id": "s1",
+            "tool": "load_ranking",
+            "args": {
+              "k": 1
+            }
+          },
+          {
+            "id": "s2",
+            "tool": "simulate_cascade",
+            "args": {
+              "trigger_buses": [
+                "$s1.busiest_bus"
+              ],
+              "alpha": 0.2
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "raw_final_response": "{\n  \"answer\": 95,\n  \"units\": \"count\",\n  \"reasoning\": \"The analysis reports that 96 buses failed in total due to the overload cascade triggered by the busiest bus, bus 68. Excluding the triggering bus itself, 95 additional buses failed as a result.\"\n}",
+  "parsed_answer": {
+    "answer": 95,
+    "units": "count",
+    "reasoning": "The analysis reports that 96 buses failed in total due to the overload cascade triggered by the busiest bus, bus 68. Excluding the triggering bus itself, 95 additional buses failed as a result."
+  },
+  "parse_error": null,
+  "status": "completed",
+  "error": null,
+  "started_at": 1784552961.658587,
+  "wall_time_s": 15.869366884231567,
+  "notes": {
+    "arm": "A",
+    "few_shot": true,
+    "validation": true
+  },
+  "totals": {
+    "prompt_tokens": 8809,
+    "completion_tokens": 443,
+    "total_tokens": 9252,
+    "n_llm_calls": 4,
+    "n_tool_calls": 2,
+    "n_code_attempts": 0
+  }
+}

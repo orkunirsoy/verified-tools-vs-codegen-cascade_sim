@@ -1,0 +1,57 @@
+[
+  {
+    "finished_at": "2026-07-20T21:05:54+00:00",
+    "model": "gpt-5-nano",
+    "temperature": 1.0,
+    "runs_per_cell": 1,
+    "conditions": [
+      "A-full"
+    ],
+    "questions": [
+      "q01"
+    ],
+    "n_executed": 1,
+    "n_skipped": 0,
+    "elapsed_min": 0.3,
+    "statuses": {
+      "completed": 1
+    }
+  },
+  {
+    "finished_at": "2026-07-21T03:12:29+00:00",
+    "model": "gpt-5-nano",
+    "temperature": 1.0,
+    "runs_per_cell": 3,
+    "conditions": [
+      "A-full",
+      "A-noval",
+      "A-zeroshot",
+      "B-hints",
+      "B-bare"
+    ],
+    "questions": [
+      "q01",
+      "q02",
+      "q03",
+      "q04",
+      "q05",
+      "q06",
+      "q07",
+      "q08",
+      "q09",
+      "q10",
+      "q11",
+      "t01",
+      "t02",
+      "t03",
+      "t04"
+    ],
+    "n_executed": 145,
+    "n_skipped": 80,
+    "elapsed_min": 98.8,
+    "statuses": {
+      "completed": 143,
+      "crashed": 2
+    }
+  }
+]

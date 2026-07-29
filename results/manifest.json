@@ -1,0 +1,82 @@
+[
+  {
+    "finished_at": "2026-07-20T13:22:06+00:00",
+    "model": "gpt-4o-mini",
+    "temperature": 1.0,
+    "runs_per_cell": 3,
+    "conditions": [
+      "A-full",
+      "A-noval",
+      "A-zeroshot"
+    ],
+    "questions": [
+      "q01",
+      "q02",
+      "q03",
+      "q04",
+      "q05",
+      "q06",
+      "q07",
+      "q08",
+      "q09",
+      "q10",
+      "q11"
+    ],
+    "n_executed": 99,
+    "n_skipped": 0,
+    "elapsed_min": 13.6,
+    "statuses": {
+      "completed": 91,
+      "crashed": 7,
+      "max_attempts": 1
+    }
+  },
+  {
+    "finished_at": "2026-07-20T15:50:02+00:00",
+    "model": "gpt-4o-mini",
+    "temperature": 1.0,
+    "runs_per_cell": 3,
+    "conditions": [
+      "A-full",
+      "A-noval",
+      "A-zeroshot"
+    ],
+    "questions": [
+      "q11"
+    ],
+    "n_executed": 9,
+    "n_skipped": 0,
+    "elapsed_min": 0.8,
+    "statuses": {
+      "completed": 6,
+      "crashed": 3
+    }
+  },
+  {
+    "finished_at": "2026-07-20T20:30:16+00:00",
+    "model": "gpt-4o-mini",
+    "temperature": 1.0,
+    "runs_per_cell": 3,
+    "conditions": [
+      "A-full",
+      "A-noval",
+      "A-zeroshot",
+      "B-hints",
+      "B-bare"
+    ],
+    "questions": [
+      "t01",
+      "t02",
+      "t03",
+      "t04"
+    ],
+    "n_executed": 60,
+    "n_skipped": 0,
+    "elapsed_min": 8.9,
+    "statuses": {
+      "completed": 49,
+      "max_attempts": 7,
+      "crashed": 4
+    }
+  }
+]

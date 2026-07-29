@@ -1,0 +1,28 @@
+# Secrets. Never commit an API key.
+.env
+.env.*
+*.key
+secrets.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Google Drive sync artifacts
+*.gdoc
+*.gsheet
+Icon?
+
+# Note: results/, results-gpt-4o/, and results-gpt-5-nano/ ARE part of this
+# submission so graders can regrade without paying for API calls. Do not add them
+# to this ignore list.

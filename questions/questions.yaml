@@ -1,0 +1,394 @@
+# The graded question set on case118, identical text for both arms.
+#
+# TWO SPLITS. Every question carries `split`.
+#
+#   split: development  q01-q11. These eleven were used to BUILD and DEBUG the harness. Eight
+#                harness bugs and five grader bugs were found by reading their failing
+#                traces, and Arm A's validator guards were each written in response to a
+#                specific failure on q04, q07, q09, q10 or q11. Arm B received no
+#                comparable round of question-driven hardening -- its fixes (unfenced code
+#                extraction, the stateless sandbox, the auto-restore of G) were general
+#                infrastructure. The tuning is therefore ASYMMETRIC and favours Arm A, so
+#                development-split scores overstate Arm A's advantage by an unknown amount.
+#
+#   split: test  t01-t04. Held out. Added 2026-07-20 to estimate how much of Arm A's
+#                development-split lead survives on questions its guards were never tuned against.
+#                Written as five; one was cut before any run when the oracle found it had
+#                no unique answer. See the "t02 WAS CUT" note below the dev questions.
+#
+# RULES FOR THE TEST SPLIT (breaking any of these turns it into a second dev set):
+#   1. Gold is computed ONCE by build_gold.py and frozen before the first run.
+#   2. No new answer_type, no new grader code, no new oracle function. If a question needs
+#      new machinery, cut the question -- new machinery is new places to overfit.
+#   3. ONE SHOT. If a harness bug surfaces on the test split, do NOT quietly fix it and
+#      re-run. Either report it as-is, or fix it, re-run BOTH splits, and say so.
+#   4. Report development and test as two separate tables. The gap between them is a finding.
+#
+# Known limitation, to be stated in the writeup: the test questions were written by
+# someone who had already read every development-split failure trace. Known failure modes were
+# deliberately not targeted, but this is not a blind held-out set.
+#
+# Design notes:
+#
+# * `question` text is fed VERBATIM to both arms. Any hint given here is given to
+#   both, so it cannot bias the comparison. Arm-specific help (the NetworkX API
+#   cheat-sheet in the B-hints condition) lives in the prompts, not here.
+#
+# * Every question is a cascade question except the two controls (q01, q02). There
+#   is no "structural removal, no cascade" question class: nobody evaluating a power
+#   grid asks what happens if a bus vanishes and physics stops. The structural value
+#   still matters, but as GRADER METADATA rather than as a question -- see
+#   `oracle.reference.no_cascade_value` and the note on q03.
+#
+# * Each question declares a `context` list naming the shared definition blocks the
+#   runner must prepend to it. Both arms get the same blocks. A question must never
+#   depend on the agent guessing our convention: if a term has more than one
+#   defensible reading, we define it rather than grade the guess. Arm A gets the
+#   definitions AND tested functions implementing them; Arm B gets the definitions
+#   and must implement them. That asymmetry IS the experiment.
+#
+#   context values:
+#     load          -> load means betweenness, not electrical demand
+#     overload      -> the Motter-Lai cascade model
+#     line_trigger  -> the trigger is a line tripping, not a bus failing
+#     modified_grid -> the question changes the topology before anything fails
+#
+# * `answer_type` and `tolerance` drive the grader. Floats compare with absolute
+#   tolerance; the grader normalizes percent-vs-fraction ("18.6%" == 0.186).
+#   `line` answers are unordered bus pairs: "79-80", "(80, 79)" and "the line between
+#   buses 79 and 80" must all normalize to the same value.
+#
+# * Gold values are NOT stored here. They are derived by scripts/build_gold.py from
+#   the oracle and frozen to gold/gold_answers.json, so the question set and the
+#   answer key cannot drift apart by hand-editing.
+
+case: case118
+
+definitions:
+  load: |
+    LOAD. A bus's LOAD is its betweenness centrality: the number of shortest paths
+    between all pairs of buses that pass through that bus, counted raw (unnormalized).
+    The "busiest" bus is the one with the highest load under this definition.
+    LOAD here does NOT mean electrical power demand in MW. Ignore any MW demand
+    values attached to the grid data.
+
+  overload: |
+    OVERLOAD CASCADE. Use the Motter-Lai cascading failure model, defined as follows:
+      1. Each bus has a LOAD equal to its betweenness centrality (unnormalized, i.e.
+         raw shortest-path counts) computed on the INITIAL intact network.
+      2. Each bus has a fixed CAPACITY = (1 + alpha) * its INITIAL load, where
+         alpha = 0.2. Capacity is computed once from the intact network and NEVER
+         changes during the cascade.
+      3. Apply the trigger described in the question.
+      4. Recompute every surviving bus's load (betweenness) on the CURRENT surviving
+         network. Any bus whose current load is strictly greater than its capacity
+         is overloaded. Remove all such buses simultaneously. One ROUND is one
+         execution of this step.
+      5. Repeat step 4 until a round produces no new failures.
+    When the cascade finishes, a bus has FAILED if it is not part of the largest
+    connected component. That covers buses that overloaded and buses that were cut off
+    from the main network without ever overloading: either way they are out of service.
+    The trigger itself has failed too.
+    Report any fraction as a fraction of the number of buses in the largest connected
+    component BEFORE the cascade. This grid starts fully connected, so that is all
+    118 buses. (This is G = N'/N in Motter-Lai 2002.)
+
+  line_trigger: |
+    LINE TRIGGER. The cascade is started by a LINE tripping, not by a bus failing.
+    Remove only that line. Both buses at its ends stay in service and may still fail
+    later if they overload. Capacity is still baselined on the intact network, with
+    the line present.
+
+  modified_grid: |
+    MODIFIED GRID. The question changes the topology before anything fails. The
+    MODIFIED grid is the INITIAL network: compute every bus's load and capacity on
+    the modified grid, before applying any trigger. Do not carry over loads or
+    capacities computed on the original topology.
+
+questions:
+  # ---------------- controls: the arms should tie here ----------------
+  - id: q01
+    split: development
+    category: simple
+    context: []
+    question: "Which bus in the grid has the most direct connections to other buses?"
+    answer_type: bus
+    notes: "Unique max, degree 9 at bus 48. One call. Floor of the difficulty range."
+
+  - id: q02
+    split: development
+    category: simple
+    context: [load]
+    question: >-
+      Which 5 buses carry the highest loads? List them in order, most loaded first.
+    answer_type: bus_list_ordered
+    notes: >-
+      Top-5 betweenness. No tie at the 5th boundary (1832.70 vs 1776.20), so the
+      ranking is unambiguous. Not filler: every cascade answer depends on load being
+      betweenness, so failing this predicts failing everything downstream. Needs the
+      `load` block because case118 carries real MW demand data, which would otherwise
+      be a defensible reading of "highest loads".
+
+  # ---------------- cascade: the hypothesis lives here ----------------
+  - id: q03
+    split: development
+    category: cascade
+    context: [load, overload]
+    question: >-
+      If the single busiest bus fails and triggers an overload cascade, what fraction
+      of the grid ends up still connected together in one piece?
+    answer_type: fraction
+    tolerance: 0.005
+    notes: >-
+      HEADLINE QUESTION. Answer 0.186. The classic wrong implementation recomputes
+      CAPACITY each round instead of holding it fixed; capacity then always exceeds
+      current load, nothing ever overloads, the cascade halts immediately, and the
+      answer collapses to the no-cascade value 0.9915 -- which looks entirely
+      reasonable for a grid that lost one bus. The grader carries that value as
+      metadata so this failure can be NAMED rather than merely scored wrong.
+
+  - id: q04
+    split: development
+    category: cascade
+    context: [load, overload]
+    question: >-
+      If the single busiest bus fails and triggers an overload cascade, how many
+      additional buses fail as a result, not counting the one that started it?
+    answer_type: count
+    notes: >-
+      Answer 95 (118 total, 22 left in the largest component, minus the trigger).
+      Exact count, no tolerance. Also tests whether the agent excludes the trigger,
+      which the question states explicitly. Of the 95, 29 overloaded and 66 were cut
+      off without overloading; the model counts both as failed, so an agent reporting
+      only the 29 overloads is wrong. 
+
+  - id: q05
+    split: development
+    category: cascade
+    context: [overload]
+    question: >-
+      Considering every bus as a possible starting point, which single bus failing
+      would trigger the overload cascade that leaves the smallest surviving connected
+      network?
+    answer_type: bus
+    notes: >-
+      Answer bus 68, which IS the busiest bus -- so the "just pick the most central
+      bus" shortcut is accidentally right here. Pairs with q06, where the same
+      shortcut is wrong. Only the pair reveals an agent that guessed. Requires 118
+      cascades if done properly.
+
+  - id: q06
+    split: development
+    category: cascade
+    context: [overload]
+    question: >-
+      Considering every bus as a possible starting point, which single bus failing
+      would trigger the overload cascade that takes the most rounds to finish?
+    answer_type: bus
+    notes: >-
+      Answer bus 76, whose cascade runs 8 rounds. NOT the busiest bus: bus 68 does the
+      most damage of any trigger but finishes in only 2 rounds. This is the shortcut
+      detector, and it survives the "failed = not in largest component" definition that
+      collapsed the earlier damage-count version into q05. Duration cannot be read off
+      any centrality measure -- the cascade has to be run to completion -- so an agent
+      answering 68 to both q05 and q06 is pattern matching. Margin is thin (8 vs 7 for
+      bus 46), but the plausible counting conventions (whether the trigger step counts
+      as a round, whether the final no-failure round counts) all shift every trigger
+      uniformly and preserve the argmax. Requires 118 cascades.
+
+  - id: q07
+    split: development
+    category: cascade
+    context: [load, overload]
+    question: >-
+      If the top 3 busiest buses all failed at the same time and triggered an overload
+      cascade, what fraction of the grid would end up still connected together in one
+      piece?
+    answer_type: fraction
+    tolerance: 0.005
+    notes: >-
+      Answer 0.297 with 25 buses overloaded. COUNTERINTUITIVE and deliberately so:
+      removing three buses including the hub is LESS damaging than removing the hub
+      alone (0.186, 29 overloaded). Taking out the top 3 up front spreads the rerouted
+      load more diffusely instead of funnelling it through the remaining hubs. An
+      agent reasoning "more removals means more damage" without computing will answer
+      below 0.186.
+
+  # ---------------- extended: line triggers and topology changes ----------------
+  - id: q08
+    split: development
+    category: cascade_extended
+    context: [overload, line_trigger]
+    question: >-
+      If the power line between bus 48 and bus 68 tripped and triggered an overload
+      cascade, how many buses would end up failed?
+    answer_type: count
+    notes: >-
+      Answer 83 (118 minus the 35 left in the largest component). No trigger bus to
+      exclude here -- a line tripped, both its end buses stay in service unless they
+      overload. Tests whether the agent removes the LINE only, rather than removing
+      bus 48 or bus 68. Of the 83, 42 overloaded, which is more overloads than any
+      single bus trigger produces.
+
+  - id: q09
+    split: development
+    category: cascade_extended
+    context: [overload, line_trigger]
+    question: >-
+      Considering every power line one at a time, which single line tripping would
+      trigger the overload cascade that leaves the smallest surviving connected
+      network?
+    answer_type: line
+    notes: >-
+      Answer the line between buses 79 and 80 (lcc 0.280, 21 overloaded, 5 rounds).
+      Requires 179 line-triggered cascades. Note 40 of the 179 lines cause zero
+      overloads, so an agent sampling a few lines and stopping will likely miss.
+
+  - id: q10
+    split: development
+    category: cascade_extended
+    context: [load, overload, modified_grid]
+    question: >-
+      Suppose a new power line were built between bus 23 and bus 81. On that upgraded
+      grid, if bus 68 fails and triggers an overload cascade, what fraction of the grid
+      ends up still connected together in one piece?
+    answer_type: fraction
+    tolerance: 0.005
+    notes: >-
+      Answer 0.119 -- WORSE than the 0.186 on the original grid. Adding a line makes
+      the cascade more damaging, a Braess-like result that punishes the intuition that
+      more lines means more robustness. Second plausible-wrong route in the set: an
+      agent that adds the line but baselines capacity on the ORIGINAL topology gets a
+      different, entirely reasonable-looking number. The `modified_grid` block exists
+      to make that a genuine error rather than a guess about our convention.
+      TRIGGER IS NAMED, not described as "the busiest bus". Adding line 23-81 moves the
+      busiest bus from 68 to 48, so "the busiest bus on that upgraded grid" and "the
+      busiest bus" meant two different buses and two wildly different answers (0.119 vs
+      0.415). Gold used 68 while the question and the modified_grid block both pointed
+      at the upgraded grid, so an agent reading it correctly would have been marked
+      wrong. Naming the bus removes the ambiguity and leaves gold unchanged.
+
+  - id: q11
+    split: development
+    category: cascade_extended
+    context: [load, overload, modified_grid]
+    question: >-
+      An engineer is considering building one new power line, and has five candidates:
+      31-81, 48-67, 23-76, 48-82, or 23-81. For each option, consider the upgraded grid
+      and the overload cascade triggered by the failure of bus 68. Which candidate line
+      leaves the largest surviving connected network?
+    answer_type: line
+    notes: >-
+      Answer the line between buses 31 and 81 (lcc 0.449 vs the 0.186 baseline). The
+      five candidates span the full range on purpose: 31-81 gives 0.449, 48-67 gives
+      0.424, 23-76 gives 0.407, 48-82 gives 0.144 and 23-81 gives 0.119, so two of the
+      five make things WORSE than building nothing. Requires five separate cascades on
+      five different modified grids. Candidates are named explicitly to keep this
+      affordable -- sweeping all ~6,700 non-edges would be 6,700 cascades.
+      TRIGGER IS NAMED for the same reason as q10, and here it is load-bearing: each
+      candidate line moves the busiest bus to a different bus (81, 79, 76, 48, 48), so a
+      per-candidate trigger would make the five options five incomparable scenarios and
+      change the answer to a tie. The comparison only means anything with the trigger
+      held fixed.
+      REWORDED from "Which one of the five leaves...". That phrasing failed 13/15 runs
+      across ALL five conditions, and 8 of those named 31-81 correctly in their reasoning
+      while putting the surviving-network SIZE (53) in the answer field. The expected
+      answer was a bare pronoun whose antecedent sat two sentences back, while the nearest
+      noun phrase before the question mark was "the largest surviving connected network".
+      q09 is the control: same answer_type, same trailing phrase, but "which single LINE"
+      attaches the head noun to "which" and scored 8/15. Uniform failure across every
+      architecture pointed at the question, not the agents.
+
+  # ================= HELD-OUT TEST SPLIT (t01-t05) =================
+  #
+  # Added 2026-07-20. Read the split rules in the header before touching these.
+  #
+  # Selection principle: each question needs a plan shape the development split never exercises,
+  # while using only existing answer_types, existing oracle functions and the existing
+  # grader. Nothing here is shaped like a known development-split failure mode -- the point is to
+  # measure whether Arm A's lead generalizes, not to manufacture a drop.
+  #
+  # NOTE: `notes` below describe INTENT and the expected plan shape only. They contain no
+  # answers, because gold has not been computed yet. build_gold.py fills that in once.
+
+  - id: t01
+    split: test
+    category: cascade_extended
+    context: [overload, modified_grid]
+    question: >-
+      Suppose a new power line connects bus 31 and bus 81. In the upgraded grid, which bus would cause the smallest surviving connected network if it failed first and triggered an overload cascade?
+    answer_type: bus
+    notes: >-
+      THE TRANSPOSE OF q11. q11 sweeps candidate ADDED LINES with the trigger held fixed;
+      this sweeps TRIGGERS with the added line held fixed. Arm A must combine `added_line`
+      with a foreach over `list_buses`, a pairing the dev split never requires: q10/q11 use
+      added_line with a single named trigger, and q05/q06 sweep triggers on the unmodified
+      grid. Requires 118 cascades on the upgraded grid.
+
+  # t02 WAS CUT (2026-07-20, before any run and before gold was built).
+  #
+  # It asked which single line tripping produces the cascade that takes the most ROUNDS.
+  # The oracle sweep found a SEVEN-WAY TIE at 6 rounds, so the question has no unique
+  # answer and is invalid. Per the test-split rules it was replaced rather than resolved
+  # by picking a winner. Every candidate replacement on the line candidate set also
+  # failed, for reasons worth recording:
+  #
+  #   argmax n_overloaded -> line 48-68, which is the line q08 already names in its text
+  #   argmin lcc_size     -> line 79-80, which is already q09's answer
+  #   argmax n_islands    -> unique (22-24), but "island" contradicts the `overload`
+  #                          block's rule that a bus not in the largest component has
+  #                          FAILED, so the agent would be graded on guessing a convention
+  #   argmax rounds on the upgraded grid -> tied again (buses 97 and 98 at 8 rounds)
+  #
+  # The line candidate set is exhausted by q08 and q09. Rather than ship a fifth question
+  # that grades a guess, the test split ships FOUR. Renumbered t01-t04, no gaps.
+
+  - id: t02
+    split: test
+    category: cascade
+    context: [overload]
+    question: >-
+      How many additional buses fail when bus 68 triggers an overload cascade compared with when bus 76 triggers one?
+    answer_type: count
+    notes: >-
+      TWO SCENARIOS PLUS ARITHMETIC. No dev question compares two cascades, and the KB has
+      no subtraction tool, so Arm A must run two `simulate_cascade` steps and let the
+      REPORTER do the subtraction from the summarized results. That probes AAG's
+      result-distillation boundary directly: the reporter prompt says "Do NOT recompute
+      anything", which may cause a refusal or a hedge. Either outcome is informative, but
+      flag it as the riskiest question of the five -- if it reads as a gotcha rather than a
+      fair question, cut it.
+
+  - id: t03
+    split: test
+    category: cascade
+    context: [load, overload]
+    question: >-
+      Among the five busiest buses, which one would leave the largest connected network after failing alone and triggering an overload cascade?
+    answer_type: bus
+    notes: >-
+      FOREACH OVER A DERIVED CANDIDATE LIST. Every development-split foreach runs over
+      `list_buses`, `list_lines`, or a literal written into the plan. None runs over an
+      earlier step's OUTPUT. Arm A must do load_ranking(k=5) then foreach over
+      `$s1.top_buses`, which is a reference-shaped candidate list the validator's guards
+      were never exercised on. Also inverts the usual direction: the development split asks for the
+      most damaging trigger, this asks for the least damaging among a strong set.
+
+  - id: t04
+    split: test
+    category: cascade_extended
+    context: [overload, line_trigger, modified_grid]
+    question: >-
+      An engineer is considering building one new power line, and has three candidates:
+      31-81, 23-76, or 48-82. For each option, consider the upgraded grid and the overload
+      cascade triggered by the power line between bus 48 and bus 68 tripping. Which
+      candidate line leaves the largest surviving connected network?
+    answer_type: line
+    notes: >-
+      ADDED LINE COMBINED WITH A LINE TRIGGER. The development split pairs `added_line` only with
+      BUS triggers (q10, q11) and uses line triggers only on the unmodified grid (q08,
+      q09). This is the one combination never seen, and it is the pairing most likely to
+      expose a convention the agent has to guess -- hence all three context blocks.
+      Three candidates rather than two so a blind guess scores 1/3, not 1/2. Wording
+      deliberately copies q11's fixed phrasing ("Which candidate line leaves...") rather
+      than the version that failed 13/15 on a dangling pronoun.

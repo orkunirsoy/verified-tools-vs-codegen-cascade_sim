@@ -1,0 +1,323 @@
+{
+  "case": "case118",
+  "grid": "case118: 118 buses, 179 edges (186 branches, 7 parallel collapsed), avg degree 3.03",
+  "n_buses": 118,
+  "alpha": 0.2,
+  "oracle_verified_by": "scripts/verify_oracle.py",
+  "answers": {
+    "q01": {
+      "question": "Which bus in the grid has the most direct connections to other buses?",
+      "category": "simple",
+      "answer_type": "bus",
+      "tolerance": null,
+      "value": 48,
+      "derivation": "degree_stats(G).max_degree_bus",
+      "provenance": {
+        "max_degree": 9,
+        "n_tied_at_max": 1
+      }
+    },
+    "q02": {
+      "question": "Which 5 buses carry the highest loads? List them in order, most loaded first.",
+      "category": "simple",
+      "answer_type": "bus_list_ordered",
+      "tolerance": null,
+      "value": [
+        68,
+        76,
+        64,
+        79,
+        37
+      ],
+      "derivation": "top 5 by unnormalized betweenness, descending",
+      "provenance": {
+        "top5_loads": [
+          2116.97,
+          1947.85,
+          1927.25,
+          1917.72,
+          1832.7
+        ],
+        "next_load": 1776.2,
+        "boundary_gap": 56.51
+      }
+    },
+    "q03": {
+      "question": "If the single busiest bus fails and triggers an overload cascade, what fraction of the grid ends up still connected together in one piece?",
+      "category": "cascade",
+      "answer_type": "fraction",
+      "tolerance": 0.005,
+      "value": 0.1864406779661017,
+      "derivation": "cascade(G, trigger=[68], alpha=0.2).lcc_fraction",
+      "provenance": {
+        "trigger": 68,
+        "lcc_size": 22,
+        "rounds": 2,
+        "n_overloaded": 29,
+        "no_cascade_value": 0.9915254237288136,
+        "note": "GRADER METADATA: an answer matching no_cascade_value is the signature of recomputing capacity each round, which makes overload impossible and halts the cascade immediately."
+      }
+    },
+    "q04": {
+      "question": "If the single busiest bus fails and triggers an overload cascade, how many additional buses fail as a result, not counting the one that started it?",
+      "category": "cascade",
+      "answer_type": "count",
+      "tolerance": null,
+      "value": 95,
+      "derivation": "cascade(G, trigger=[68], alpha=0.2).n_dead minus the trigger -- failed means not in the largest component",
+      "provenance": {
+        "trigger": 68,
+        "n_dead_including_trigger": 96,
+        "lcc_size": 22,
+        "rounds": 2,
+        "of_which_overloaded": 29,
+        "of_which_cut_off_without_overloading": 66,
+        "overloaded_buses": [
+          18,
+          19,
+          20,
+          24,
+          25,
+          28,
+          30,
+          33,
+          36,
+          45,
+          47,
+          58,
+          60,
+          62,
+          63,
+          64,
+          65,
+          67,
+          71,
+          74,
+          75,
+          78,
+          79,
+          80,
+          90,
+          91,
+          95,
+          112,
+          117
+        ]
+      }
+    },
+    "q05": {
+      "question": "Considering every bus as a possible starting point, which single bus failing would trigger the overload cascade that leaves the smallest surviving connected network?",
+      "category": "cascade",
+      "answer_type": "bus",
+      "tolerance": null,
+      "value": 68,
+      "derivation": "argmin over all buses of cascade(G,[b],alpha=0.2).lcc_fraction",
+      "provenance": {
+        "lcc_fraction": 0.1864406779661017,
+        "busiest_bus": 68,
+        "note": "answer IS the busiest bus; shortcut accidentally right here, wrong on q06"
+      }
+    },
+    "q06": {
+      "question": "Considering every bus as a possible starting point, which single bus failing would trigger the overload cascade that takes the most rounds to finish?",
+      "category": "cascade",
+      "answer_type": "bus",
+      "tolerance": null,
+      "value": 76,
+      "derivation": "argmax over all buses of cascade(G,[b],alpha=0.2).rounds",
+      "provenance": {
+        "rounds": 8,
+        "lcc_fraction": 0.23728813559322035,
+        "busiest_bus": 68,
+        "busiest_bus_rounds": 2,
+        "note": "answer is NOT the busiest bus. 68 does the most damage in only 2 rounds; this is the shortcut detector, and duration cannot be read off any centrality measure"
+      }
+    },
+    "q07": {
+      "question": "If the top 3 busiest buses all failed at the same time and triggered an overload cascade, what fraction of the grid would end up still connected together in one piece?",
+      "category": "cascade",
+      "answer_type": "fraction",
+      "tolerance": 0.005,
+      "value": 0.2966101694915254,
+      "derivation": "cascade(G, trigger=[68, 76, 64], alpha=0.2).lcc_fraction",
+      "provenance": {
+        "trigger": [
+          68,
+          76,
+          64
+        ],
+        "n_overloaded": 25,
+        "rounds": 2,
+        "single_hub_lcc_for_contrast": 0.1864406779661017,
+        "note": "LESS damaging than the hub alone -- deliberately counterintuitive"
+      }
+    },
+    "q08": {
+      "question": "If the power line between bus 48 and bus 68 tripped and triggered an overload cascade, how many buses would end up failed?",
+      "category": "cascade_extended",
+      "answer_type": "count",
+      "tolerance": null,
+      "value": 83,
+      "derivation": "cascade_from_line(G, line=(48, 68), alpha=0.2).n_dead",
+      "provenance": {
+        "line": [
+          48,
+          68
+        ],
+        "lcc_fraction": 0.2966101694915254,
+        "lcc_size": 35,
+        "rounds": 4,
+        "of_which_overloaded": 42,
+        "note": "no trigger bus to exclude: a line tripped, both end buses stay in service unless they overload"
+      }
+    },
+    "q09": {
+      "question": "Considering every power line one at a time, which single line tripping would trigger the overload cascade that leaves the smallest surviving connected network?",
+      "category": "cascade_extended",
+      "answer_type": "line",
+      "tolerance": null,
+      "value": [
+        79,
+        80
+      ],
+      "derivation": "argmin over all lines of cascade_from_line(G,e,alpha=0.2).lcc_fraction",
+      "provenance": {
+        "lcc_fraction": 0.2796610169491525,
+        "n_overloaded": 21,
+        "rounds": 5,
+        "n_lines": 179,
+        "n_lines_causing_zero_overloads": 40
+      }
+    },
+    "q10": {
+      "question": "Suppose a new power line were built between bus 23 and bus 81. On that upgraded grid, if bus 68 fails and triggers an overload cascade, what fraction of the grid ends up still connected together in one piece?",
+      "category": "cascade_extended",
+      "answer_type": "fraction",
+      "tolerance": 0.005,
+      "value": 0.11864406779661017,
+      "derivation": "cascade(with_line(G,(23, 81)), [68], alpha=0.2).lcc_fraction",
+      "provenance": {
+        "added_line": [
+          23,
+          81
+        ],
+        "n_overloaded": 46,
+        "baseline_lcc_without_line": 0.1864406779661017,
+        "note": "adding a line makes the cascade WORSE (Braess-like)"
+      }
+    },
+    "q11": {
+      "question": "An engineer is considering building one new power line, and has five candidates: 31-81, 48-67, 23-76, 48-82, or 23-81. For each option, consider the upgraded grid and the overload cascade triggered by the failure of bus 68. Which candidate line leaves the largest surviving connected network?",
+      "category": "cascade_extended",
+      "answer_type": "line",
+      "tolerance": null,
+      "value": [
+        31,
+        81
+      ],
+      "derivation": "argmax over the 5 named candidate lines of cascade(with_line(G,e), [68], alpha=0.2).lcc_fraction",
+      "provenance": {
+        "candidates": {
+          "31-81": 0.4492,
+          "48-67": 0.4237,
+          "23-76": 0.4068,
+          "48-82": 0.1441,
+          "23-81": 0.1186
+        },
+        "baseline_lcc_without_line": 0.1864,
+        "note": "2 of the 5 candidates are WORSE than building nothing"
+      }
+    },
+    "t01": {
+      "question": "Suppose a new power line connects bus 31 and bus 81. In the upgraded grid, which bus would cause the smallest surviving connected network if it failed first and triggered an overload cascade?",
+      "category": "cascade_extended",
+      "answer_type": "bus",
+      "tolerance": null,
+      "value": 112,
+      "derivation": "argmin over every bus b of cascade(with_line(G,(31, 81)), [b], alpha=0.2).lcc_fraction",
+      "provenance": {
+        "lcc_fraction": 0.178,
+        "n_tied": 1,
+        "added_line": [
+          31,
+          81
+        ],
+        "q05_answer_on_original_grid": 68,
+        "margin_to_runner_up_buses": 1,
+        "runners_up": [
+          41,
+          43,
+          81
+        ],
+        "answer_if_overload_test_were_non_strict": 31,
+        "note": "transpose of q11: sweeps TRIGGERS with the upgrade fixed. Answer differs from q05's, so the upgrade genuinely moves the worst trigger and the dev answer cannot be reused. DIAGNOSTIC: an agent answering 31 used >= rather than > in the overload test -- the same class of named signature as t02's -4 and q03's no_cascade_value"
+      }
+    },
+    "t02": {
+      "question": "How many additional buses fail when bus 68 triggers an overload cascade compared with when bus 76 triggers one?",
+      "category": "cascade",
+      "answer_type": "count",
+      "tolerance": null,
+      "value": 6,
+      "derivation": "cascade(G,[68],alpha=0.2).n_dead - cascade(G,[76],alpha=0.2).n_dead",
+      "provenance": {
+        "n_dead_bus68": 96,
+        "n_dead_bus76": 90,
+        "n_tied": 1,
+        "same_answer_excluding_triggers": 6,
+        "overloaded_only_reading": -4,
+        "note": "two scenarios plus arithmetic. The KB has no subtraction tool, so Arm A must run two cascades and let the REPORTER subtract -- against a reporter prompt that says 'Do NOT recompute anything'. Riskiest question in the split. An agent counting overloads rather than not-in-LCC answers -4, i.e. the wrong sign"
+      }
+    },
+    "t03": {
+      "question": "Among the five busiest buses, which one would leave the largest connected network after failing alone and triggering an overload cascade?",
+      "category": "cascade",
+      "answer_type": "bus",
+      "tolerance": null,
+      "value": 37,
+      "derivation": "argmax over the top-5 betweenness buses of cascade(G,[b],alpha=0.2).lcc_fraction",
+      "provenance": {
+        "top5_by_load": [
+          68,
+          76,
+          64,
+          79,
+          37
+        ],
+        "n_tied": 1,
+        "lcc_by_candidate": {
+          "68": 0.1864,
+          "76": 0.2373,
+          "64": 0.3051,
+          "79": 0.2797,
+          "37": 0.3644
+        },
+        "note": "foreach over a DERIVED candidate list ($s1.top_buses), a shape no dev question uses. Not monotonic in load rank (rank 3 beats rank 4), so it is not simply 'pick the least central of the five' by construction"
+      }
+    },
+    "t04": {
+      "question": "An engineer is considering building one new power line, and has three candidates: 31-81, 23-76, or 48-82. For each option, consider the upgraded grid and the overload cascade triggered by the power line between bus 48 and bus 68 tripping. Which candidate line leaves the largest surviving connected network?",
+      "category": "cascade_extended",
+      "answer_type": "line",
+      "tolerance": null,
+      "value": [
+        23,
+        76
+      ],
+      "derivation": "argmax over the 3 named candidate lines of cascade_from_line(with_line(G,e), (48, 68), alpha=0.2).lcc_fraction",
+      "provenance": {
+        "candidates": {
+          "31-81": 0.3136,
+          "23-76": 0.3559,
+          "48-82": 0.1441
+        },
+        "n_tied": 1,
+        "trigger_line": [
+          48,
+          68
+        ],
+        "note": "added_line combined with a LINE trigger, the one pairing the dev split never uses. 3 candidates so a blind guess scores 1/3"
+      }
+    }
+  }
+}
